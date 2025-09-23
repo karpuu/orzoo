@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>Gioco Carte Napoletane</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    .hand { margin-top: 10px; }
+    .card { display: inline-block; padding: 10px; border: 1px solid #000; margin: 2px; }
+  </style>
+</head>
+<body>
+  <h1>Gioco Carte Napoletane</h1>
+  <input id="nickname" placeholder="Inserisci il tuo nome">
+  <button id="createBtn">Crea Partita</button>
+  <input id="gameId" placeholder="ID partita">
+  <button id="joinBtn">Unisciti</button>
+
+  <div id="game" style="display:none">
+    <p>Il tuo turno: <span id="currentPlayer"></span></p>
+    <div class="hand" id="hand"></div>
+    <button id="stoBtn">Dichiara STÒ</button>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="main.js"></script>
+</body>
+</html>
