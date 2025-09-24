@@ -1,4 +1,3 @@
-// game.js
 import { createDeck } from "./deck.js";
 
 // Crea una nuova partita
@@ -17,12 +16,19 @@ export function createGame(gameId, hostId, hostName) {
     stoDeclared: null,
     round: 1
   };
+
   // Distribuisci 4 carte a ciascun giocatore
   players.forEach(player => {
     for (let i = 0; i < 4; i++) {
       player.hand.push(deck.pop());
     }
+    // Rendi visibili solo le prime 2 per 10 secondi
+    player.seenCards = [0, 1];
+    setTimeout(() => {
+      player.seenCards = [];
+    }, 10000);
   });
+
   return state;
 }
 
@@ -40,11 +46,17 @@ export function joinGame(game, playerId, playerName) {
   for (let i = 0; i < 4; i++) {
     newPlayer.hand.push(game.deck.pop());
   }
+  // Mostra solo le prime 2 per 10 secondi
+  newPlayer.seenCards = [0, 1];
+  setTimeout(() => {
+    newPlayer.seenCards = [];
+  }, 10000);
+
   game.players.push(newPlayer);
   return true;
 }
 
-// Funzione principale per gestire un turno
+// Turno di gioco
 export function playTurn(game, playerId, action) {
   const playerIndex = game.players.findIndex(p => p.id === playerId);
   const player = game.players[playerIndex];
@@ -53,7 +65,7 @@ export function playTurn(game, playerId, action) {
     return { success: false, message: "Non è il tuo turno" };
   }
 
-  // Pesca carta (dal mazzo o scarti)
+  // Pesca dal mazzo o dagli scarti
   let drawnCard;
   if (action.from === "deck") {
     drawnCard = game.deck.pop();
@@ -64,44 +76,43 @@ export function playTurn(game, playerId, action) {
   }
 
   // Decidi se tenere o scartare
+  let discarded;
   if (action.keep) {
-    // Scambia con una delle sue carte
     const idx = action.swapIndex;
-    const discarded = player.hand[idx];
+    discarded = player.hand[idx];
     player.hand[idx] = drawnCard;
     game.discardPile.push(discarded);
-    handleSpecial(discarded, player, game);
   } else {
-    // Scarta direttamente
-    game.discardPile.push(drawnCard);
-    handleSpecial(drawnCard, player, game);
+    discarded = drawnCard;
+    game.discardPile.push(discarded);
   }
 
-  // Scarto reattivo: controlla se altri giocatori vogliono scartare la stessa carta
+  // Gestisci potere speciale
+  handleSpecial(discarded, player, game);
+
+  // Scarto reattivo: qualsiasi numero può essere replicato
   game.players.forEach(p => {
     if (p.id !== playerId) {
-      const cardIndex = p.hand.findIndex(c => c.valore === drawnCard.valore);
-      if (cardIndex >= 0) {
-        // Può scartarla per ridurre punti
-        if (action.reactToDiscard && action.reactToDiscard[p.id]) {
-          const scartata = p.hand.splice(cardIndex, 1)[0];
-          game.discardPile.push(scartata);
-          // Se scarta carta di un altro sbagliando, pesca 2 carte di penalità
-          if (!action.reactToDiscard[p.id].correct) {
-            p.hand.push(game.deck.pop());
-            p.hand.push(game.deck.pop());
-          }
+      const cardIndex = p.hand.findIndex(c => c.valore === discarded.valore);
+      if (cardIndex >= 0 && action.reactToDiscard && action.reactToDiscard[p.id]) {
+        const scartata = p.hand.splice(cardIndex, 1)[0];
+        game.discardPile.push(scartata);
+
+        // Se lo scarto è sbagliato → penalità (pesca 2 carte)
+        if (!action.reactToDiscard[p.id].correct) {
+          p.hand.push(game.deck.pop());
+          p.hand.push(game.deck.pop());
         }
       }
     }
   });
 
-  // Passa al turno successivo
+  // Passa turno
   game.currentPlayerIndex = (game.currentPlayerIndex + 1) % game.players.length;
   return { success: true };
 }
 
-// Gestione dichiarazione STÒ
+// Dichiarazione STÒ
 export function declareSto(game, playerId) {
   game.stoDeclared = playerId;
   const player = game.players.find(p => p.id === playerId);
@@ -110,10 +121,8 @@ export function declareSto(game, playerId) {
 
 // Calcolo punti
 export function calculatePoints(player) {
-  // Fante/Cavallo/Re valgono 10 punti
   return player.hand.reduce((sum, card) => {
-    if (card.valore >= 8) return sum + 10;
-    return sum + card.valore;
+    return sum + card.valore; // ora 8=8, 9=9, 10=10
   }, 0);
 }
 
@@ -121,13 +130,20 @@ export function calculatePoints(player) {
 function handleSpecial(card, player, game) {
   switch (card.valore) {
     case 8: // Fante
-      // Guarda una tua carta
+      // Guarda una tua carta (aggiungi indice a seenCards)
+      if (player.hand.length > 0) {
+        player.seenCards.push(0); // esempio: prima carta
+      }
       break;
     case 9: // Cavallo
-      // Scambia una tua carta con un altro giocatore o tra altri
+      // Scambia con altro giocatore (da decidere lato frontend)
       break;
     case 10: // Re
       // Dai una carta del mazzo a un altro giocatore
+      if (game.deck.length > 0) {
+        const target = game.players.find(p => p.id !== player.id);
+        if (target) target.hand.push(game.deck.pop());
+      }
       break;
     default:
       break;
