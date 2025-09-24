@@ -21,8 +21,24 @@
     <div class="hand" id="hand"></div>
     <button id="stoBtn">Dichiara STÒ</button>
   </div>
+  <button id="createBtn">Crea partita</button>
+<button id="joinBtn">Unisciti</button>
+<input id="nickname" placeholder="Nickname" />
+<input id="gameId" placeholder="ID partita" />
+<button id="drawDeckBtn">Pesca dal mazzo</button>
+<button id="drawDiscardBtn">Pesca dagli scarti</button>
+<button id="stoBtn">Dichiara STÒ</button>
+
+<div id="currentPlayer"></div>
+<div id="hand"></div>
+<div id="discard"></div>
+<div id="game" style="display:none"></div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script src="main.js"></script>
 </body>
 </html>
+<div id="pendingChoice" style="display:none">
+  <p>Hai pescato una carta. Vuoi scambiarla con una delle tue o scartarla?</p>
+  <button id="discardDrawnBtn">Scarta pescata</button>
+</div>
