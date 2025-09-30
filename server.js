@@ -1,66 +1,115 @@
+// server.js (snippet; integra nel tuo file esistente)
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
-import { createGame, joinGame, playTurn, declareSto } from "./game.js";
-
-const app = express();
 import path from "path";
 import { fileURLToPath } from "url";
+import { createGame, joinGame, requestDraw, playDrawn, respondToReaction, endReaction, declareSto, getPublicState } from "./game.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const app = express();
 app.use(express.static(path.join(__dirname, "public")));
-const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*" } // permette connessioni da qualsiasi frontend
-});
 
-// Ogni stanza con le partite
-const games = {}; // idStanza -> stato partita
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
+const games = {}; // gameId -> game state
+
+// helper broadcast per-player (stato PERSONALIZZATO)
+function broadcastGame(game) {
+  for (const p of game.players) {
+    io.to(p.id).emit("update", getPublicState(game, p.id));
+  }
+}
 
 io.on("connection", (socket) => {
-  console.log("Nuovo giocatore collegato:", socket.id);
+  console.log("connesso", socket.id);
 
-  // Creare una nuova partita
-  socket.on("createGame", (nickname, callback) => {
+  socket.on("createGame", (nickname, cb) => {
     const gameId = Math.random().toString(36).substring(2, 8);
-    games[gameId] = createGame(gameId, socket.id, nickname);
+    const game = createGame(gameId, socket.id, nickname || "Host");
+    games[gameId] = game;
     socket.join(gameId);
-    callback({ gameId, state: games[gameId] });
-    io.to(gameId).emit("update", games[gameId]);
+    // clear seenCards after 10s
+    setTimeout(() => {
+      const g = games[gameId];
+      if (!g) return;
+      const host = g.players.find(p => p.id === socket.id);
+      if (host) host.seenCards = [];
+      broadcastGame(g);
+    }, 10000);
+    broadcastGame(game);
+    if (cb) cb({ gameId, state: getPublicState(game, socket.id) });
   });
 
-  // Unire un giocatore a una partita esistente
-  socket.on("joinGame", ({ gameId, nickname }, callback) => {
-    if (!games[gameId]) return callback({ error: "Partita non trovata" });
-    joinGame(games[gameId], socket.id, nickname);
+  socket.on("joinGame", ({ gameId, nickname }, cb) => {
+    const game = games[gameId];
+    if (!game) return cb && cb({ error: "Partita non trovata" });
+    const res = joinGame(game, socket.id, nickname || "Player");
+    if (!res.success) return cb && cb({ error: res.message });
     socket.join(gameId);
-    callback({ state: games[gameId] });
-    io.to(gameId).emit("update", games[gameId]);
+    // clear seenCards of new player after 10s
+    setTimeout(() => {
+      const g = games[gameId];
+      if (!g) return;
+      const p = g.players.find(x => x.id === socket.id);
+      if (p) p.seenCards = [];
+      broadcastGame(g);
+    }, 10000);
+    broadcastGame(game);
+    if (cb) cb({ state: getPublicState(game, socket.id) });
   });
 
-  // Eseguire un turno (pesca, scarto, poteri)
-  socket.on("playTurn", ({ gameId, action }, callback) => {
-    const result = playTurn(games[gameId], socket.id, action);
-    io.to(gameId).emit("update", games[gameId]);
-    callback(result);
+  socket.on("requestDraw", ({ gameId, source }) => {
+    const game = games[gameId];
+    if (!game) return socket.emit("errorMsg", "Partita non trovata");
+    const r = requestDraw(game, socket.id, source);
+    if (!r.success) return socket.emit("errorMsg", r.message);
+    // invia la carta pescata SOLO al giocatore che ha pescato
+    socket.emit("drawn", r.card);
+    broadcastGame(game);
   });
 
-  // Dichiarazione STÒ
-  socket.on("declareSto", (gameId) => {
-    declareSto(games[gameId], socket.id);
-    io.to(gameId).emit("update", games[gameId]);
+  socket.on("playDrawn", ({ gameId, keep, swapIndex }) => {
+    const game = games[gameId];
+    if (!game) return socket.emit("errorMsg", "Partita non trovata");
+    const r = playDrawn(game, socket.id, { keep, swapIndex });
+    if (!r.success) return socket.emit("errorMsg", r.message);
+    // notifica a tutti che è partita una reaction e l'ultimo scarto
+    broadcastGame(game);
+    if (r.reactionStarted) {
+      io.to(gameId).emit("reactionStarted", { value: r.value });
+      // apri window per le reazioni (es. 5 secondi)
+      setTimeout(() => {
+        endReaction(game);
+        broadcastGame(game);
+        io.to(gameId).emit("reactionEnded");
+      }, 5000);
+    }
   });
 
-  // Disconnessione giocatore
+  socket.on("respondReaction", ({ gameId, handIndex, targetId }) => {
+    const game = games[gameId];
+    if (!game) return socket.emit("errorMsg", "Partita non trovata");
+    const r = respondToReaction(game, socket.id, handIndex, targetId);
+    if (!r.success) return socket.emit("errorMsg", r.message);
+    broadcastGame(game);
+  });
+
+  socket.on("declareSto", ({ gameId }) => {
+    const game = games[gameId];
+    if (!game) return socket.emit("errorMsg", "Partita non trovata");
+    declareSto(game, socket.id);
+    broadcastGame(game);
+  });
+
   socket.on("disconnect", () => {
-    console.log("Giocatore disconnesso:", socket.id);
-    // TODO: gestire se uno esce dalla partita
+    // opzionale: gestire sconnesioni / rimozione giocatori
   });
 });
 
-// Server attivo sulla porta 3000
-server.listen(3000, () => {
-  console.log("Server avviato su http://localhost:3000");
+server.listen(process.env.PORT || 3000, () => {
+  console.log("Server avviato su port", process.env.PORT || 3000);
 });
